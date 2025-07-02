@@ -1,11 +1,11 @@
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
-from urllib.parse import urlencode
 
 from bot_controller.router import Router
 from models import User
-from settings import HUBSTAFF_CLIENT_ID, HUBSTAFF_REDIRECT_URI, HUBSTAFF_AUTH_URL
+from settings import HUBSTAFF_CLIENT_ID, HUBSTAFF_REDIRECT_URI
+from bot_controller.services.hubstaff_oauth import hubstaff_oauth
 
 
 router = Router(name=__name__)
@@ -18,15 +18,34 @@ router = Router(name=__name__)
 async def hubstaff_login(event, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
     """Handle /hubstaff_login command and return a button with Hubstaff login URL"""
     
-    # Build Hubstaff OAuth URL with proper parameters
-    oauth_params = {
-        'client_id': HUBSTAFF_CLIENT_ID,
-        'redirect_uri': HUBSTAFF_REDIRECT_URI,
-        'response_type': 'code',
-        'scope': 'read write'  # Adjust scopes as needed for your application
+    # Get chat ID for state parameter
+    if isinstance(event, types.Message):
+        chat_id = event.chat.id
+    elif isinstance(event, types.CallbackQuery):
+        chat_id = event.message.chat.id if event.message else user.external_id
+    else:
+        chat_id = user.external_id
+    
+    # Build Hubstaff OAuth URL with proper parameters including state
+    auth_params = {
+        "client_id": HUBSTAFF_CLIENT_ID,
+        "redirect_uri": HUBSTAFF_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid read write",
+        "state": str(chat_id)  # Use chat_id as state for security
     }
-    hubstaff_login_url = f"{HUBSTAFF_AUTH_URL}?{urlencode(oauth_params)}"
-    print(hubstaff_login_url)
+    
+    # Generate auth URL using OIDC discovery
+    hubstaff_login_url = hubstaff_oauth.get_auth_url(
+        client_id=HUBSTAFF_CLIENT_ID,
+        redirect_uri=HUBSTAFF_REDIRECT_URI,
+        scope="openid read write"
+    )
+    
+    # Add state parameter to the URL
+    from urllib.parse import urlencode
+    hubstaff_login_url = f"{hubstaff_login_url}&{urlencode({'state': str(chat_id)})}"
+    
     # Build inline keyboard with login button
     builder = InlineKeyboardBuilder()
     builder.add(

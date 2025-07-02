@@ -4,14 +4,24 @@ import os
 
 from dotenv import load_dotenv
 from bot_controller import BotController
+from web_server import start_web_server
 
 # Load environment variables from .env file
 load_dotenv()
 
 
 async def main() -> None:
+    # Start web server for OAuth callbacks
+    web_runner = await start_web_server(host='0.0.0.0', port=8080)
+    
+    # Start bot controller
     bot_controller = BotController(os.getenv("TELEGRAM_API_KEY"))
-    await bot_controller.start()
+    
+    try:
+        await bot_controller.start()
+    finally:
+        # Cleanup web server
+        await web_runner.cleanup()
 
 
 if __name__ == "__main__":

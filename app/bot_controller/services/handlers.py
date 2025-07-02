@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot_controller.router import Router
 from bot_controller import services
+from bot_controller.services.hubstaff import hubstaff_login
 from models import User
 
 
@@ -22,7 +23,7 @@ async def send_welcome(event, *_) -> str:
     command="help",
     description="view all commands",
 )
-async def help_command(*_) -> tuple[str, types.InlineKeyboardMarkup]:
+async def help_command(event, *_) -> tuple[str, types.InlineKeyboardMarkup]:
     """Display all available commands as buttons"""
     # Collect commands from all routers
     all_commands = []
@@ -63,7 +64,7 @@ async def help_command(*_) -> tuple[str, types.InlineKeyboardMarkup]:
     command="hello",
     description="just hello command",
 )
-async def hello(*_) -> str:
+async def hello(event, *_) -> str:
     return "Well, hello!"
 
 
@@ -73,8 +74,16 @@ async def hello(*_) -> str:
     command="user_info",
     description="user info",
 )
-async def user_info(message: types.Message, session: AsyncSession, user: User) -> str:  # noqa; pylint: disable=unused-argument
-    return f"User ID: {user.external_id}\nChat ID: {message.chat.id}\nRegistration date: {user.created_at}"
+async def user_info(event, session: AsyncSession, user: User) -> str:  # noqa; pylint: disable=unused-argument
+    # Handle both Message and CallbackQuery
+    if isinstance(event, types.Message):
+        chat_id = event.chat.id
+    elif isinstance(event, types.CallbackQuery):
+        chat_id = event.message.chat.id if event.message else "N/A"
+    else:
+        chat_id = "Unknown"
+    
+    return f"User ID: {user.external_id}\nChat ID: {chat_id}\nRegistration date: {user.created_at}"
 
 
 @router.register()

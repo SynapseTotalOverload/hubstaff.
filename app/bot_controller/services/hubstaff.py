@@ -15,7 +15,7 @@ router = Router(name=__name__)
     command="hubstaff_login",
     description="get Hubstaff login button",
 )
-async def hubstaff_login(message: types.Message, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
+async def hubstaff_login(event, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
     """Handle /hubstaff_login command and return a button with Hubstaff login URL"""
     
     # Build Hubstaff OAuth URL with proper parameters

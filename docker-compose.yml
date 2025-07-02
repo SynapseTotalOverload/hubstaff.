@@ -11,4 +11,6 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app  # Mount local project into /app
+      - .:/app
+    ports:
+      - "8000:8000"

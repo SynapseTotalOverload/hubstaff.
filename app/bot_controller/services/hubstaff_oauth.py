@@ -49,19 +49,31 @@ class HubstaffOAuth:
         
         return self._oidc_config
     
-    def get_auth_url(self, client_id: str, redirect_uri: str, scope: str = "read write") -> str:
+    def get_auth_url(self, client_id: str, redirect_uri: str, scope: str = "openid", state: str = None) -> str:
         """Generate authorization URL using discovered endpoints"""
         config = self.get_oidc_config()
         
-        params = {
-            'client_id': client_id,
-            'redirect_uri': redirect_uri,
-            'response_type': 'code',
-            'scope': scope
-        }
+        import secrets
+        import urllib.parse
         
-        # Build query string
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        # Generate nonce for security
+        nonce = secrets.token_urlsafe(32)
+        
+        # Build query parameters manually to avoid encoding the redirect_uri
+        params = [
+            f'client_id={urllib.parse.quote(client_id)}',
+            f'redirect_uri={redirect_uri}',  # Don't encode redirect_uri
+            f'response_type={urllib.parse.quote("code")}',
+            f'scope={urllib.parse.quote(scope)}',
+            f'nonce={urllib.parse.quote(nonce)}'
+        ]
+        
+        # Add state if provided
+        if state:
+            params.append(f'state={urllib.parse.quote(state)}')
+        
+        # Build query string manually
+        query_string = '&'.join(params)
         return f"{config.authorization_endpoint}?{query_string}"
 
 # Global instance

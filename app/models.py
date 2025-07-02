@@ -40,11 +40,14 @@ class User(BaseModel, Base):
     created_at: Mapped[datetime.datetime] = sa.Column(sa.TIMESTAMP, nullable=False, server_default=STMT_NOW_TIMESTAMP)
     updated_at: Mapped[datetime.datetime] = sa.Column(sa.TIMESTAMP, nullable=False, server_default=STMT_NOW_TIMESTAMP)
     
-    # Hubstaff OAuth tokens (temporarily commented out to fix database error)
-    # hubstaff_access_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
-    # hubstaff_refresh_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
-    # hubstaff_id_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
-    # hubstaff_token_expires_at: Mapped[int] = sa.Column(sa.INT, nullable=True)
+    # Hubstaff OAuth tokens
+    hubstaff_access_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
+    hubstaff_refresh_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
+    hubstaff_id_token: Mapped[str] = sa.Column(sa.TEXT, nullable=True)
+    hubstaff_token_expires_at: Mapped[int] = sa.Column(sa.INT, nullable=True)
+    
+    # User role
+    is_admin: Mapped[bool] = sa.Column(sa.BOOLEAN, nullable=False, default=False)
 
 
 Base.metadata.create_all(create_engine(f"sqlite:///{DB_NAME}"))

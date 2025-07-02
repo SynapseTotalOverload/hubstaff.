@@ -1,24 +1,25 @@
 import asyncio
 import sqlite3
 from models import async_session
+import sqlalchemy as sa
 
 async def migrate_database():
-    """Add Hubstaff columns to existing database"""
+    """Add missing columns to existing database"""
     async with async_session() as session:
-        # Add new columns if they don't exist
-        await session.execute("""
-            ALTER TABLE user ADD COLUMN hubstaff_access_token TEXT;
-        """)
-        await session.execute("""
-            ALTER TABLE user ADD COLUMN hubstaff_refresh_token TEXT;
-        """)
-        await session.execute("""
-            ALTER TABLE user ADD COLUMN hubstaff_id_token TEXT;
-        """)
-        await session.execute("""
-            ALTER TABLE user ADD COLUMN hubstaff_token_expires_at INTEGER;
-        """)
+        try:
+            # Add is_admin column if it doesn't exist
+            await session.execute(sa.text("""
+                ALTER TABLE user ADD COLUMN is_admin BOOLEAN DEFAULT 0;
+            """))
+            print("✅ Added is_admin column successfully")
+        except Exception as e:
+            if "duplicate column name" in str(e):
+                print("ℹ️ is_admin column already exists")
+            else:
+                print(f"❌ Error adding is_admin column: {e}")
+        
         await session.commit()
+        print("✅ Database migration completed")
 
 if __name__ == "__main__":
     asyncio.run(migrate_database()) 

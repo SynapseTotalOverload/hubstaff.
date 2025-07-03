@@ -1,0 +1,89 @@
+name: CI/CD
+
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/cd]
+    paths:
+      - 'app/**'
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SA_KEY }}
+  GCP_INSTANCE_NAME: ${{ secrets.GCP_INSTANCE_NAME }}
+  GCP_INSTANCE_ZONE: ${{ secrets.GCP_INSTANCE_ZONE }}
+  IMAGE_NAME: hubstaff-app
+  GCR_REGISTRY: gcr.io
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Auth to GCP
+    - name: Auth to GCP
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    # Setting GCP SDK
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    # Auth to GCR
+    - name: Docker auth
+      run: gcloud auth configure-docker --quiet
+
+    # Build and push image
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: .ci/Dockerfile.dep
+        push: true
+        tags: ${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        
+    # Deploy on instance
+    - name: Deploy to GCP instance
+      env:
+        ENV_FILE: ${{ secrets.ENV_FILE }}
+      run: |
+        
+        FULL_IMAGE_NAME="${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:latest"
+        
+        gcloud compute ssh ${{ env.GCP_INSTANCE_NAME }} \
+          --zone ${{ env.GCP_INSTANCE_ZONE }} \
+          --tunnel-through-iap \
+          --command="
+            echo \"$ENV_FILE\" > .env
+            cat .env
+            docker pull $FULL_IMAGE_NAME
+            docker stop ${{ env.IMAGE_NAME }} || true
+            docker rm ${{ env.IMAGE_NAME }} || true
+            docker run -d \
+              --name ${{ env.IMAGE_NAME }} \
+              --restart=always \
+              -p 8000:8000 \
+              --env-file=.env \
+              $FULL_IMAGE_NAME 
+            docker container prune -f
+            docker image prune -af
+            "
+        
+        PUBLIC_IP=$(gcloud compute instances describe ${{ env.GCP_INSTANCE_NAME }} \
+          --zone=${{ env.GCP_INSTANCE_ZONE }} \
+          --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
+    
+        echo "ip: $PUBLIC_IP:8000" 

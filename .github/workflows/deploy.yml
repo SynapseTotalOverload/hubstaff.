@@ -6,7 +6,7 @@ on:
   push:
     branches: [ci/cd]
     paths:
-      - '*'
+      - 'app/**'
 
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}

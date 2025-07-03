@@ -4,6 +4,7 @@ name: Backend CI/CD
 on:
   workflow_dispatch:
   push:
+    branches: [ci/cd]
     paths:
       - 'app/**'
 

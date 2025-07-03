@@ -67,7 +67,7 @@ jobs:
           --zone ${{ env.GCP_INSTANCE_ZONE }} \
           --tunnel-through-iap \
           --command="
-            echo ${{ env.ENV_FILE }} > .env
+            echo \"$ENV_FILE\" > .env
             cat .env
             docker pull $FULL_IMAGE_NAME
             docker stop ${{ env.IMAGE_NAME }} || true

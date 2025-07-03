@@ -75,7 +75,7 @@ jobs:
               --name ${{ env.IMAGE_NAME }} \
               --restart=always \
               -p 8000:8000 \
-              --env-file .env \
+              --env-file=.env \
               $FULL_IMAGE_NAME 
             docker container prune -f
             docker image prune -af

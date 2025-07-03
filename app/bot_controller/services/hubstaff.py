@@ -1,6 +1,7 @@
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
 
 from bot_controller.router import Router
 from models import User
@@ -30,7 +31,7 @@ async def hubstaff_login(event, session: AsyncSession, user: User) -> tuple[str,
     hubstaff_login_url = hubstaff_oauth.get_auth_url(
         client_id=HUBSTAFF_CLIENT_ID,
         redirect_uri=HUBSTAFF_REDIRECT_URI,
-        scope="openid",
+        scope="openid profile email hubstaff:read hubstaff:write",
         state=str(chat_id)  # Use chat_id as state for security
     )
     
@@ -53,7 +54,7 @@ async def hubstaff_login(event, session: AsyncSession, user: User) -> tuple[str,
     description="HUBSTAFF STATUS",
 )
 async def hubstaff_status(event, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
-    """Check if user is connected to Hubstaff"""
+    """Check if user is connected to Hubstaff and show all user data from Hubstaff API"""
     
     # Check if user has Hubstaff tokens
     has_access_token = bool(user.hubstaff_access_token)
@@ -64,6 +65,22 @@ async def hubstaff_status(event, session: AsyncSession, user: User) -> tuple[str
         # User is connected to Hubstaff
         status_emoji = "✅"
         status_text = "Connected"
+        
+        # Fetch user info from Hubstaff API
+        try:
+            from bot_controller.services.hubstaff_api import create_hubstaff_api_service
+            api_service = create_hubstaff_api_service(user.hubstaff_access_token)
+            hubstaff_user = api_service.get_user_info()
+        except Exception as e:
+            hubstaff_user = {"error": str(e)}
+        
+        # Format user info
+        if hubstaff_user and not hubstaff_user.get("error"):
+            user_info_lines = [f"• **{k}**: {v}" for k, v in hubstaff_user.items()]
+            user_info_text = "\n".join(user_info_lines)
+        else:
+            user_info_text = f"❌ Failed to fetch user info: {hubstaff_user.get('error', 'Unknown error')}"
+        
         message = (
             f"{status_emoji} **Hubstaff Status: {status_text}**\n\n"
             "🎉 You are successfully connected to Hubstaff!\n\n"
@@ -78,6 +95,8 @@ async def hubstaff_status(event, session: AsyncSession, user: User) -> tuple[str
             f"• Refresh Token: {'✅ Present' if has_refresh_token else '❌ Missing'}\n"
             f"• ID Token: {'✅ Present' if has_id_token else '❌ Missing'}\n"
             f"• Admin Access: {'✅ Yes' if user.is_admin else '❌ No'}\n\n"
+            "**Hubstaff User Info:**\n"
+            f"{user_info_text}\n\n"
             "Use /help to see all available commands!"
         )
         
@@ -118,6 +137,142 @@ async def hubstaff_status(event, session: AsyncSession, user: User) -> tuple[str
         )
         
         return message, None
+
+
+@router.register(
+    command="debug_permissions",
+    description="DEBUG HUBSTAFF PERMISSIONS",
+)
+async def debug_permissions(event, session: AsyncSession, user: User) -> str:
+    """Debug user's Hubstaff permissions"""
+    try:
+        # Import the API service
+        from bot_controller.services.hubstaff_api import create_hubstaff_api_service
+        
+        # Check if user has access token
+        if not user.hubstaff_access_token:
+            return "❌ **No Access Token**\n\nYou need to be connected to Hubstaff first. Use /hubstaff_login to connect."
+        
+        # Create API service
+        api_service = create_hubstaff_api_service(user.hubstaff_access_token)
+        
+        # Test permissions
+        permissions = api_service.test_permissions()
+        
+        # Build debug report
+        report = "🔍 **Hubstaff Permissions Debug Report**\n\n"
+        
+        # Organizations
+        if permissions['organizations']:
+            report += f"✅ **Organizations:** Access granted ({permissions['organizations_count']} orgs)\n"
+        else:
+            report += f"❌ **Organizations:** {permissions.get('organizations_error', 'Unknown error')}\n"
+        
+        # User info
+        if permissions['user_info']:
+            user_data = permissions.get('user_data', {})
+            report += f"✅ **User Info:** Access granted (User: {user_data.get('name', 'Unknown')})\n"
+        else:
+            report += f"❌ **User Info:** {permissions.get('user_info_error', 'Unknown error')}\n"
+        
+        # Activities
+        if permissions['activities']:
+            report += f"✅ **Activities:** Access granted ({permissions['activities_count']} activities)\n"
+        else:
+            report += f"❌ **Activities:** {permissions.get('activities_error', 'Unknown error')}\n"
+        
+        report += "\n**Token Info:**\n"
+        report += f"• Token length: {len(user.hubstaff_access_token)} characters\n"
+        report += f"• Token starts with: {user.hubstaff_access_token[:10]}...\n"
+        
+        return report
+        
+    except Exception as e:
+        return f"❌ **Debug Error**\n\nFailed to debug permissions: {str(e)}"
+
+
+@router.register(
+    command="my_activity",
+    description="SHOW MY ACTIVITY",
+)
+async def my_activity(event, session: AsyncSession, user: User) -> str:
+    """Show user's own activity for the last day"""
+    try:
+        # Import the API service
+        from bot_controller.services.hubstaff_api import create_hubstaff_api_service, format_activities_summary
+        
+        # Check if user has access token
+        if not user.hubstaff_access_token:
+            return "❌ **No Access Token**\n\nYou need to be connected to Hubstaff first. Use /hubstaff_login to connect."
+        
+        # Debug: Show token information
+        print(f"🔑 **Bot Token Debug (My Activity):**")
+        print(f"User ID: {user.external_id}")
+        print(f"Token length: {len(user.hubstaff_access_token)} characters")
+        print(f"Token starts with: {user.hubstaff_access_token[:20]}...")
+        print(f"Token ends with: ...{user.hubstaff_access_token[-10:]}")
+        print(f"Full token: {user.hubstaff_access_token}")
+        print("-" * 50)
+        
+        # Create API service
+        api_service = create_hubstaff_api_service(user.hubstaff_access_token)
+        
+        # Get organizations
+        organizations = api_service.get_organizations()
+        
+        if not organizations:
+            return "❌ **No Organizations Found**\n\nYou don't have access to any organizations in Hubstaff."
+        
+        # Use the first organization
+        organization = organizations[0]
+        organization_id = organization['id']
+        organization_name = organization.get('name', 'Unknown Organization')
+        
+        # Get last day activities
+        all_activities = api_service.get_last_day_activities(organization_id)
+
+        print(all_activities,88888888)
+        # Filter activities for current user only
+        user_activities = [activity for activity in all_activities if activity.user_id == user.external_id]
+        
+        if not user_activities:
+            return "📊 **No Personal Activity Found**\n\nYou haven't recorded any activity in the last 24 hours."
+        
+        # Calculate user totals
+        total_duration = sum(activity.duration for activity in user_activities)
+        total_hours = total_duration / 3600
+        
+        # Format response
+        response = f"👤 **My Activity - Last 24 Hours**\n\n"
+        response += f"🏢 **Organization:** {organization_name}\n"
+        response += f"⏰ **Total Time Tracked:** {total_hours:.1f} hours\n"
+        response += f"📝 **Total Activities:** {len(user_activities)}\n\n"
+        
+        response += "**Recent Activities:**\n"
+        
+        # Show recent activities sorted by time
+        recent_activities = sorted(user_activities, key=lambda x: x.start_time, reverse=True)[:10]
+        
+        for activity in recent_activities:
+            start_time_str = activity.start_time.strftime('%H:%M')
+            duration_hours = activity.duration / 3600
+            
+            project_info = ""
+            if activity.project_name:
+                project_info = f" ({activity.project_name})"
+            
+            response += f"• 🕐 **{start_time_str}**{project_info}: {duration_hours:.1f}h\n"
+            
+            if activity.note:
+                response += f"  📝 Note: {activity.note}\n"
+        
+        
+     
+        
+        return response
+        
+    except Exception as e:
+        return f"❌ **Error Loading Activity**\n\nFailed to load your activity data: {str(e)}\n\nPlease try again or contact support if the issue persists."
 
 
 @router.register(
@@ -168,7 +323,7 @@ async def hubstaff_logout(event, session: AsyncSession, user: User) -> tuple[str
 
 
 @router.register()
-async def handle_logout_callback(callback: types.CallbackQuery, session: AsyncSession, user: User) -> str:
+async def handle_logout_callback(callback: types.CallbackQuery, session: AsyncSession, user: User) -> str | tuple[str, types.InlineKeyboardMarkup]:
     """Handle logout confirmation callbacks"""
     if not callback.data:
         await callback.answer("Invalid callback data")
@@ -193,6 +348,16 @@ async def handle_logout_callback(callback: types.CallbackQuery, session: AsyncSe
         await session.commit()
         await callback.answer("✅ Logged out successfully!")
         
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        
+        builder = InlineKeyboardBuilder()
+        builder.add(
+            types.InlineKeyboardButton(
+                text="🔗 Reconnect to Hubstaff",
+                callback_data="hubstaff_reconnect"
+            )
+        )
+        
         return (
             "✅ **Logout Successful!**\n\n"
             "You have been successfully logged out from Hubstaff.\n\n"
@@ -202,7 +367,8 @@ async def handle_logout_callback(callback: types.CallbackQuery, session: AsyncSe
             "• 🔐 Admin privileges reset\n"
             "• 📊 Data access disabled\n\n"
             "**To reconnect:**\n"
-            "Use /hubstaff_login to connect your account again."
+            "Click the button below to connect your account again.",
+            builder.as_markup()
         )
     
     elif action == "logout" and confirm_type == "cancel":
@@ -302,6 +468,15 @@ async def handle_hubstaff_callback(callback: types.CallbackQuery, session: Async
 
 
 @router.register()
+async def handle_hubstaff_reconnect(callback: types.CallbackQuery, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
+    """Handle reconnect to Hubstaff button"""
+    await callback.answer("Starting Hubstaff reconnection...")
+    
+    # Reuse the existing hubstaff_login logic
+    return await hubstaff_login(callback, session, user)
+
+
+@router.register()
 async def handle_role_selection(callback: types.CallbackQuery, session: AsyncSession, user: User) -> str:
     """Handle role selection after Hubstaff login"""
     import os
@@ -320,39 +495,71 @@ async def handle_role_selection(callback: types.CallbackQuery, session: AsyncSes
     
     if role == "role" and action == "user":
         # User role selected
-        await callback.answer("✅ User role confirmed!")
-        return (
-            "👤 **User Role Confirmed!**\n\n"
-            "Welcome! You now have access to:\n"
-            "• 📊 View your time tracking data\n"
-            "• 📈 Check your reports\n"
-            "• 🔔 Receive notifications\n"
-            "• ⏰ Start/stop time tracking\n\n"
-            "Use /help to see all available commands!"
-        )
+        if user.is_admin:
+            # Switching from admin to user
+            user.is_admin = False
+            await session.commit()
+            await callback.answer("✅ Switched to User role!")
+            return (
+                "👤 **Switched to User Role!**\n\n"
+                "You are now in user mode. You have access to:\n"
+                "• 📊 View your time tracking data\n"
+                "• 📈 Check your reports\n"
+                "• 🔔 Receive notifications\n"
+                "• ⏰ Start/stop time tracking\n\n"
+                "Use /help to see all available commands!"
+            )
+        else:
+            # Already user role
+            await callback.answer("✅ You're already in User role!")
+            return (
+                "👤 **User Role (Already Active)**\n\n"
+                "You are already in user mode. You have access to:\n"
+                "• 📊 View your time tracking data\n"
+                "• 📈 Check your reports\n"
+                "• 🔔 Receive notifications\n"
+                "• ⏰ Start/stop time tracking\n\n"
+                "Use /help to see all available commands!"
+            )
     
     elif role == "role" and action == "admin":
-        # Admin role selected - check password
-        admin_password = ADMIN_PASSWORD
-        
-        # Create password input keyboard
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            types.InlineKeyboardButton(
-                text="🔙 Back to Role Selection",
-                callback_data=f"role_back_{chat_id}"
+        # Admin role selected
+        if user.is_admin:
+            # Already admin role
+            await callback.answer("✅ You're already in Admin role!")
+            return (
+                "🔐 **Admin Role (Already Active)**\n\n"
+                "You are already in admin mode. You have access to:\n"
+                "• 👥 Manage team members\n"
+                "• 📊 View all team reports\n"
+                "• ⚙️ Configure bot settings\n"
+                "• 🔧 System administration\n"
+                "• 📈 Advanced analytics\n"
+                "• 🛡️ Security controls\n\n"
+                "Use /view to access admin menu!"
             )
-        )
-        
-        await callback.answer("Please enter admin password")
-        return (
-            "🔐 **Admin Access Required**\n\n"
-            "Please enter the admin password to continue.\n\n"
-            "Send the password as a message to this bot.",
-            builder.as_markup()
-        )
+        else:
+            # Switching to admin - check password
+            admin_password = ADMIN_PASSWORD
+            
+            # Create password input keyboard
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            
+            builder = InlineKeyboardBuilder()
+            builder.add(
+                types.InlineKeyboardButton(
+                    text="🔙 Back to Role Selection",
+                    callback_data=f"role_back_{chat_id}"
+                )
+            )
+            
+            await callback.answer("Please enter admin password")
+            return (
+                "🔐 **Admin Access Required**\n\n"
+                "Please enter the admin password to continue.\n\n"
+                "Send the password as a message to this bot.",
+                builder.as_markup()
+            )
     
     elif role == "role" and action == "back":
         # Back to role selection
@@ -364,7 +571,7 @@ async def handle_role_selection(callback: types.CallbackQuery, session: AsyncSes
 
 
 @router.register()
-async def handle_admin_password(event, session: AsyncSession, user: User) -> str:
+async def handle_admin_password(event, session: AsyncSession, user: User) -> tuple[str, types.ReplyKeyboardMarkup]:
     """Handle admin password verification"""
     import os
     
@@ -381,25 +588,18 @@ async def handle_admin_password(event, session: AsyncSession, user: User) -> str
         user.is_admin = True  # Assuming you have this field in User model
         await session.commit()
         
-        # Create admin menu with inline buttons
-        builder = InlineKeyboardBuilder()
-        builder.add(
-            types.InlineKeyboardButton(
-                text="👥 Select Members",
-                callback_data=f"admin_select_members_{user.external_id}"
-            )
-        )
-        builder.add(
-            types.InlineKeyboardButton(
-                text="📊 Show All Activity",
-                callback_data=f"admin_show_activity_{user.external_id}"
-            )
-        )
-        builder.add(
-            types.InlineKeyboardButton(
-                text="📄 Generate CSV",
-                callback_data=f"admin_generate_csv_{user.external_id}"
-            )
+        # Create admin menu with Reply Keyboard
+        from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+        
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="👥 Select Members"), KeyboardButton(text="📊 Show All Activity")],
+                [KeyboardButton(text="📄 Generate CSV"), KeyboardButton(text="🔙 Back to User Menu")],
+                [KeyboardButton(text="🔐 Logout from Hubstaff")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=False,
+            input_field_placeholder="Select admin action..."
         )
         
         return (
@@ -412,8 +612,8 @@ async def handle_admin_password(event, session: AsyncSession, user: User) -> str
             "• 🔧 System administration\n"
             "• 📈 Advanced analytics\n"
             "• 🛡️ Security controls\n\n"
-            "**Select an option below:**",
-            builder.as_markup()
+            "**Use the keyboard below to navigate:**",
+            keyboard
         )
     else:
         return (
@@ -423,36 +623,209 @@ async def handle_admin_password(event, session: AsyncSession, user: User) -> str
 
 
 async def handle_role_selection_initial(callback: types.CallbackQuery, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
-    """Show initial role selection menu"""
+    """Show initial role selection menu with active role indication"""
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
-    message = (
-        "✅ Hubstaff login successful!\n\n"
-        "Your account has been connected to Hubstaff. "
-        "You can now use Hubstaff features in this bot.\n\n"
-        "Please select your role:"
-    )
+    # Determine current role status
+    if user.is_admin:
+        current_role = "🔐 Admin"
+        role_status = "🟢 **Currently Active: Admin**"
+    else:
+        current_role = "👤 User"
+        role_status = "🟢 **Currently Active: User**"
+    
+    # Check if user has any Hubstaff connection
+    has_connection = bool(user.hubstaff_access_token or user.hubstaff_refresh_token)
+    
+    if has_connection:
+        message = (
+            f"🔄 **Change Role**\n\n"
+            f"{role_status}\n\n"
+            "Select a new role or keep your current one:"
+        )
+    else:
+        message = (
+            "✅ **Role Selection**\n\n"
+            "🟢 **No role set yet**\n\n"
+            "Please select your role:"
+        )
     
     builder = InlineKeyboardBuilder()
-    builder.add(
-        types.InlineKeyboardButton(
-            text="👤 I'm User",
-            callback_data=f"role_user_{callback.from_user.id}"
+    
+    # Add role buttons with visual indicators
+    if user.is_admin:
+        # Admin is active - show in green
+        builder.add(
+            types.InlineKeyboardButton(
+                text="🟢 🔐 I'm Admin (Active)",
+                callback_data=f"role_admin_{callback.from_user.id}"
+            )
         )
-    )
-    builder.add(
-        types.InlineKeyboardButton(
-            text="🔐 I'm Admin",
-            callback_data=f"role_admin_{callback.from_user.id}"
+        builder.add(
+            types.InlineKeyboardButton(
+                text="⚪ 👤 I'm User",
+                callback_data=f"role_user_{callback.from_user.id}"
+            )
         )
-    )
+    else:
+        # User is active - show in green
+        builder.add(
+            types.InlineKeyboardButton(
+                text="⚪ 🔐 I'm Admin",
+                callback_data=f"role_admin_{callback.from_user.id}"
+            )
+        )
+        builder.add(
+            types.InlineKeyboardButton(
+                text="🟢 👤 I'm User (Active)",
+                callback_data=f"role_user_{callback.from_user.id}"
+            )
+        )
     
     return message, builder.as_markup()
 
 
 @router.register()
-async def handle_change_role_callback(callback: types.CallbackQuery, session: AsyncSession, user: User) -> str:
+async def handle_change_role_callback(callback: types.CallbackQuery, session: AsyncSession, user: User) -> tuple[str, types.InlineKeyboardMarkup]:
     """Handle change role callback and show role selection menu again"""
     # Reuse the role selection initial menu
-    from bot_controller.services.hubstaff import handle_role_selection_initial
-    return await handle_role_selection_initial(callback, session, user) 
+    return await handle_role_selection_initial(callback, session, user)
+
+
+@router.register()
+async def handle_admin_reply_keyboard(event: types.Message, session: AsyncSession, user: User) -> str | tuple[str, types.ReplyKeyboardMarkup | types.ReplyKeyboardRemove]:
+    """Handle admin Reply Keyboard button presses"""
+    
+    if not user.is_admin:
+        return "❌ You don't have admin access."
+    
+    text = event.text
+    
+    if text == "👥 Select Members":
+        return (
+            "👥 **Select Team Members**\n\n"
+            "**Available Members:**\n"
+            "• 👤 John Doe (john.doe@company.com)\n"
+            "• 👤 Jane Smith (jane.smith@company.com)\n"
+            "• 👤 Mike Johnson (mike.j@company.com)\n"
+            "• 👤 Sarah Wilson (sarah.w@company.com)\n\n"
+            "**Actions:**\n"
+            "• ✅ Select all members\n"
+            "• 🔍 Search by name/email\n"
+            "• 📊 View member activity\n"
+            "• ⚙️ Manage permissions\n\n"
+            "This feature will be implemented soon!"
+        )
+    
+    elif text == "📊 Show All Activity":
+        try:
+            # Import the API service
+            from bot_controller.services.hubstaff_api import create_hubstaff_api_service, format_activities_summary
+            
+            # Check if user has access token
+            if not user.hubstaff_access_token:
+                return "❌ **No Access Token**\n\nYou need to be connected to Hubstaff first. Use /hubstaff_login to connect."
+            
+            # Debug: Show token information
+            print(f"🔑 **Bot Token Debug (My Activity):**")
+            print(f"User ID: {user.external_id}")
+            print(f"Token length: {len(user.hubstaff_access_token)} characters")
+            print(f"Token starts with: {user.hubstaff_access_token[:20]}...")
+            print(f"Token ends with: ...{user.hubstaff_access_token[-10:]}")
+            print(f"Full token: {user.hubstaff_access_token}")
+            print("-" * 50)
+            
+            # Create API service
+            api_service = create_hubstaff_api_service(user.hubstaff_access_token)
+            
+            # Get organizations
+            organizations = api_service.get_organizations()
+            
+            if not organizations:
+                return "❌ **No Organizations Found**\n\nYou don't have access to any organizations in Hubstaff."
+            
+            # Use the first organization
+            organization = organizations[0]
+            organization_id = organization['id']
+            organization_name = organization.get('name', 'Unknown Organization')
+            
+            # Get last day activities
+            activities = api_service.get_last_day_activities(organization_id)
+           
+            # Format the response
+            summary = format_activities_summary(activities)
+            
+            # Add organization info and debug link
+           
+            full_response = f"🏢 **Organization:** {organization_name}\n\n{summary}\n\n"
+            
+            return full_response
+            
+        except Exception as e:
+            return f"❌ **Error Loading Activity**\n\nFailed to load activity data: {str(e)}\n\nPlease try again or contact support if the issue persists."
+    
+    elif text == "📄 Generate CSV":
+        return (
+            "📄 **Generate CSV Report**\n\n"
+            "**Report Options:**\n"
+            "• 📊 Time tracking data\n"
+            "• 👥 Team member activity\n"
+            "• 📈 Project reports\n"
+            "• 💰 Billing information\n\n"
+            "**Date Range:**\n"
+            "• 📅 Last 7 days\n"
+            "• 📅 Last 30 days\n"
+            "• 📅 Custom range\n\n"
+            "**Export Format:**\n"
+            "• 📄 CSV (Excel compatible)\n"
+            "• 📊 JSON (API format)\n"
+            "• 📋 PDF (Printable)\n\n"
+            "This feature will be implemented soon!"
+        )
+    
+    elif text == "🔙 Back to User Menu":
+        # Remove admin status and show user menu
+        user.is_admin = False
+        await session.commit()
+        
+        from aiogram.types import ReplyKeyboardRemove
+        
+        return (
+            "👤 **Switched to User Mode**\n\n"
+            "You are now in user mode. You have access to:\n"
+            "• 📊 View your time tracking data\n"
+            "• 📈 Check your reports\n"
+            "• 🔔 Receive notifications\n"
+            "• ⏰ Start/stop time tracking\n\n"
+            "Use /help to see all available commands!",
+            ReplyKeyboardRemove()
+        )
+    
+    elif text == "🔐 Logout from Hubstaff":
+        # Clear all tokens and logout
+        user.hubstaff_access_token = None
+        user.hubstaff_refresh_token = None
+        user.hubstaff_id_token = None
+        user.hubstaff_token_expires_at = None
+        user.is_admin = False
+        
+        await session.commit()
+        
+        # For now, we'll just return the message with ReplyKeyboardRemove
+        # The reconnect button will be available through the /hubstaff_login command
+        from aiogram.types import ReplyKeyboardRemove
+        
+        return (
+            "✅ **Logout Successful!**\n\n"
+            "You have been successfully logged out from Hubstaff.\n\n"
+            "**What happened:**\n"
+            "• 🗑️ All access tokens cleared\n"
+            "• 🔒 Connection removed\n"
+            "• 🔐 Admin privileges reset\n"
+            "• 📊 Data access disabled\n\n"
+            "**To reconnect:**\n"
+            "Use /hubstaff_login to connect your account again.",
+            ReplyKeyboardRemove()
+        )
+    
+    return "❌ Unknown admin action. Please use the keyboard buttons." 

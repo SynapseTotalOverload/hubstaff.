@@ -68,6 +68,7 @@ jobs:
           --tunnel-through-iap \
           --command="
             echo ${{ env.ENV_FILE }} > .env
+            cat .env
             docker pull $FULL_IMAGE_NAME
             docker stop ${{ env.IMAGE_NAME }} || true
             docker rm ${{ env.IMAGE_NAME }} || true

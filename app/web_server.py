@@ -13,7 +13,7 @@ from sqlalchemy import select
 bot_instance = None
 
 def set_bot_instance(bot):
-    """Set the bot instance for notifications"""
+    """Set the bot instance for ntifications"""
     global bot_instance
     bot_instance = bot
 
